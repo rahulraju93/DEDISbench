@@ -64,6 +64,301 @@ DB_ENV ***envporiginal;
 DB ***dbprinter; // DB structure handle
 DB_ENV ***envprinter;
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <time.h>
+#include <string.h>
+
+#define MAX_SIZE 256
+
+
+struct define_entropy {
+	double ent;
+	struct define_entropy_operations *buffer_to_populate;
+};
+
+struct define_entropy_operations {
+	int (*fill)(struct define_entropy *, void *, unsigned int);
+};
+
+int fill_nothing_inside_block(struct define_entropy *ds, void *buffer_to_populate, unsigned int size);
+int populate_DEDISbench_like_initial(struct define_entropy *ds, void *buffer_to_populate, unsigned int size);
+int contigous_block_fill(struct define_entropy *ds, void *buffer_to_populate, unsigned int size);
+int contigous_block_fill_random(struct define_entropy *ds, void *buffer_to_populate, unsigned int size);
+int populating_buffer_with_actual_entropy(struct define_entropy *ds, void *buffer_to_populate, unsigned int size);
+int random_shuffle(unsigned char array[], unsigned int size);
+double calculate_entropy_of_prob_dist(double prob_dist[], unsigned int size);
+double test_check_buffer_to_populate_output(void *buffer_to_populate, unsigned int size);
+int binary_search(double index, double array[], unsigned int size);
+int cum_dist_distribution_entropy_gen(double prob_dist[], unsigned int size, double cum_dist[]);
+double secant_root(double (*func)(double, double, double), double lower_lim, double higher_lim, double begin, double end);
+double transformation(double lower_lim, double higher_lim, double value_found);
+double finding_root(double (*func)(double, double, double), double lower_lim, double higher_lim);
+int prob_dist_distribution_entropy_gen(double prob_dist[], int size , double ent);
+
+
+/*
+	buffer_to_populatefer will not change in allocated memory, and will be filled with zeroes
+*/
+int fill_nothing_inside_block(struct define_entropy *ds, void *buffer_to_populate, unsigned int size){
+	return 0;
+}
+
+/*
+	This function is filling the buffer_to_populatefer with strings just like in DEDISbench with constant characters (can be changed to any character)
+*/
+int populate_DEDISbench_like_initial(struct define_entropy *ds, void *buffer_to_populate, unsigned int size){
+
+	int i=0;
+	for(i=0; i < size; i++){
+		((char *)buffer_to_populate)[i] = 0;
+	}
+	return 0;
+}
+
+/*
+	contigous_block_fill fills the buffer_to_populate with random data according to
+	a prob_dist has the entropy specified in the define_entropy.
+
+	It calculates the cum_dist then populates the buffer_to_populatefer by searching in the cum_dist for
+    the random number.
+*/
+
+int contigous_block_fill(struct define_entropy *ds, void *buffer_to_populate, unsigned int size){
+
+	int i = 0;
+	double prob_dist[MAX_SIZE];
+	double cum_dist[MAX_SIZE];
+	unsigned char characters_available[MAX_SIZE];
+
+	//Calculate the probability distribution according to the given entropy
+	prob_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, ds-> ent);
+
+	//Calculate cum_dist from the prob_dist
+	cum_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, cum_dist);
+
+	//initializing the character table available which is 256 for a maximum of 8 bits/byte
+	for(i=0; i< MAX_SIZE; i++)
+		characters_available[i] = (unsigned char)i;
+
+	//shuffle the symbols table
+	random_shuffle(characters_available, MAX_SIZE);
+
+	for(i=0; i < size; i++){
+		((unsigned char*)buffer_to_populate)[i] = characters_available[binary_search(rand()/(double)RAND_MAX, cum_dist, MAX_SIZE)];
+	}
+	return 0;
+}
+
+/*
+	contigous_block_fill_random fills the buffer_to_populatefer with random data according to
+	the prob_dist.
+
+	It will generate contiguous segments of data in the buffer_to_populate to make different same
+	size buffer_to_populate look different (shuffle the symbols table).
+*/
+
+int contigous_block_fill_random(struct define_entropy *ds, void *buffer_to_populate, unsigned int size){
+
+	int i = 0;
+	double prob_dist[MAX_SIZE];
+	double cum_dist[MAX_SIZE];
+	unsigned char characters_available[MAX_SIZE];
+
+	//Calculate prob_dist according to the given entropy
+	prob_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, ds-> ent);
+
+
+	//Calculate cum_dist from the prob_dist
+	cum_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, cum_dist);
+
+	//character table initialization
+	for(i=0; i< MAX_SIZE; i++)
+		characters_available[i] = (unsigned char)i;
+
+	//shuffle the character table
+    random_shuffle(characters_available, MAX_SIZE);
+
+	int k=0;
+	int j=0;
+
+	for(i=0; i< MAX_SIZE; i++){
+		for(j=0; j < (int)(prob_dist[i]*size); j++){
+			((unsigned char*)buffer_to_populate)[k] = characters_available[i];
+			k++;
+		}
+	}
+	//remaining elements
+	for(; k < size; k++){
+		((unsigned char *)buffer_to_populate)[k] = characters_available[binary_search(rand()/(double)RAND_MAX, cum_dist, MAX_SIZE)];
+	}
+
+	return 0;
+}
+
+
+/*allocating memory for buffer and filling with data from contigous_block_fill_random.
+
+This is an example of how the data can populate a given buffer.
+*/
+
+
+int populating_buffer_with_actual_entropy(struct define_entropy *ds, void *buffer_to_populate, unsigned int size){
+	void *tmp = malloc(size);
+    int err = contigous_block_fill_random(ds, tmp, size);
+    memcpy(buffer_to_populate, tmp, size);
+    free(tmp);
+    return err;
+}
+
+
+/*generates a random number between start and end for the permutation of the character table*/
+
+inline int random_int(int start, int end){
+	return start + rand()%(end - start);
+}
+
+/*swaps two values in the array*/
+
+inline void swap(unsigned char array[], int i, int j){
+	int temp = array[i];
+	array[i] = array[j];
+	array[j] = temp;
+}
+
+/*uses the above two functions to randomly shuffle the values in the array*/\
+
+int random_shuffle(unsigned char array[], unsigned int size){
+
+	int i,j;
+	if(size <= 0) return -1;
+	for(i=0; i < size; i++){
+		j = random_int(i,size);
+		swap(array, i, j);
+	}
+	return 0;
+}
+
+/*uses the Shannon entropy formula to caluclate the probability density and as a result the entropy */
+
+double calculate_entropy_of_prob_dist(double prob_dist[], unsigned int size){
+
+	double entropy =0;
+	int i= 0;
+
+	if(size <= 0)
+		return -1;
+
+	for(i=0; i<size; i++){
+		if(prob_dist[i] > 0)
+			entropy+= prob_dist[i]*log2(1.0/prob_dist[i]);
+	}
+	return entropy;
+}
+
+/*checking for whether the buffer entropy is equal to the user defined entropy or marginally close*/
+
+double test_check_buffer_to_populate_output(void *buffer_to_populate, unsigned int size){
+
+	int i=0;
+	double prob_dist[MAX_SIZE];
+	for(i=0; i < MAX_SIZE; i++)
+		prob_dist[i] = 0.0;
+	for(i=0; i < size; i++)
+		prob_dist[((unsigned char*)buffer_to_populate)[i]]+= 1.0/size;
+	return calculate_entropy_of_prob_dist(prob_dist, MAX_SIZE);
+}
+
+int binary_search(double index, double array[], unsigned int size){
+
+	int start = 0;
+	int end = size-1;
+	int mid;
+
+	if(size <= 0)
+		return -2;
+	if(index <= array[0])
+		return 0;
+	while(end-start > 1){
+		mid = (end+start)/2;
+		if(index == array[mid])
+			return mid;
+		if(index < array[mid])
+			end = mid;
+		else
+			start = mid;
+	}
+	return end;
+}
+
+/*cumalative distribution function that is derived from the probability distribution and is a non-decreasing function*/
+
+int cum_dist_distribution_entropy_gen(double prob_dist[], unsigned int size, double cum_dist[]){
+
+	int i;
+	if (size <= 0)
+		return -1;
+
+	cum_dist[0] = prob_dist[0];
+	for(i=1; i < size; i++){
+		cum_dist[i] = cum_dist[i-1] + prob_dist[i];
+	}
+	return 0;
+}
+
+/*method used to find roots for the equation that is dependent on one variable - eplison to generate the user-defined probability density, cumalitive density and character table to populate the buffer of a given size */
+
+double secant_root(double (*func)(double, double, double), double lower_lim, double higher_lim, double begin, double end){
+	int i =0;
+	double a, b;
+	for(i=0; i<20 ;i++){
+		b = func(lower_lim, higher_lim, end);
+		a = (end-begin) / (b - func(lower_lim, higher_lim, begin)) * b;
+		if(fabs(a) < 5e-11)
+			return end;
+		begin = end;
+		end = end - a;
+	}
+	return end;
+}
+
+/* the variable - eplison that is shifted to the other side of the Shannon entropy equation to and used to find the root of the equation*/
+
+double transformation(double lower_lim, double higher_lim, double value_found){
+	double prob = 1.0/lower_lim;
+    double shift_func = higher_lim - ((lower_lim-2.0)/lower_lim)*log2(1.0/prob);
+    return (prob+value_found)*log2(1.0/(prob+value_found)) + (prob-value_found)*log2(1.0/(prob-value_found)) - shift_func;
+}
+
+/*this function calls the above functions to find the root using a lower and higher limit of -1e-10+ 1.0/lower_lim and
+1e-10 respectively */
+
+double finding_root(double (*func)(double, double, double), double lower_lim, double higher_lim){
+	return secant_root(func, lower_lim, higher_lim, 1e-10, -1e-10+ 1.0/lower_lim);
+}
+
+/* this function produces the user defined entropy by calculating the root from the secant method
+and provides the manipulated probability distribution */
+
+int prob_dist_distribution_entropy_gen(double prob_dist[], int size , double ent){
+
+	int i = 0;
+	if(size <= 0)
+		return -1;
+	for(i=0; i< size; i++)
+		prob_dist[i]=0.0;
+    double temp = (int) ceil(pow(2.0,ent));
+    for(i = 0; i < (int)temp; i++){
+        prob_dist[i] = 1.0/temp;
+	}
+    double reduction = finding_root(transformation, temp, ent);
+    prob_dist[0] += reduction;
+    prob_dist[1] -= reduction;
+	return 0;
+}
+
+
 
 //calculate block checksum and see if already exists at the hash table
 int check_duplicates(unsigned char* block,uint64_t bsize,int id_blocksize){
@@ -606,6 +901,49 @@ int main (int argc, char *argv[]){
 	free(envprinter);
 
 return 0;
+
+/*main is used for testing this code*/
+/*
+int main(int argc, char* argv[]){
+	//int i=0;
+
+	double prob_dist[MAX_SIZE];
+	double cum_dist[MAX_SIZE];
+	double index = .99;
+	prob_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, 7.5);
+	cum_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, cum_dist);
+	int return_index = binary_search(index, cum_dist, MAX_SIZE);
+	//test_check_prob_dist_output(cum_dist, MAX_SIZE);
+	printf("%f is found at %d, which is between %f and %f\n", index, return_index, cum_dist[return_index-1], cum_dist[return_index]);
+	for(int i=0; i< 801; i++){
+		prob_dist_distribution_entropy_gen(prob_dist, MAX_SIZE, i/100.0);
+		printf("Entropy requested: %f\n",i/100.0);
+		//test_check_prob_dist_output(prob_dist, 5);
+		printf("Entropy generated: %f\n\n", calculate_entropy_of_prob_dist(prob_dist, MAX_SIZE));
+	}
+	return 0;
+}
+*/
+/*
+int main(int argc, char **argv){
+
+	FILE* pFile;
+	struct define_entropy ds;
+	unsigned int size = 256*1024;
+	void* buffer_to_populate=malloc(size);
+	ds.ent = 3.00;
+	populating_buffer_to_populatefer_with_actual_entropy(&ds, buffer_to_populate, size);
+	pFile = fopen("/home/rahulraju93/result33","w+");
+    	if (pFile ){
+        		fwrite(buffer_to_populate,1,sizeof(buffer_to_populate),pFile);
+		   }
+	fclose(pFile);
+	printf("The entropy of buffer_to_populate: %f\n", test_check_buffer_to_populatefer_output(buffer_to_populate, size));
+	free(buffer_to_populate);
+	return 0;
+}
+*/
+
 
 }
 
